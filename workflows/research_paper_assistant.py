@@ -1,7 +1,7 @@
 import os
 import aiohttp
 import asyncio
-from typing import Annotated, Literal, TypedDict, List, Dict, Any, Callable, Coroutine
+from typing import Literal, TypedDict, List, Dict, Any, Callable, Coroutine
 from enum import IntEnum, Enum
 from langchain_core.messages import (
     HumanMessage,
@@ -11,9 +11,8 @@ from langchain_core.messages import (
 )
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import BaseTool
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from dotenv import dotenv_values
 
 env = dotenv_values()
@@ -389,10 +388,6 @@ workflow.add_edge("data_analysis", "supervisor")
 workflow.add_edge("writing", "supervisor")
 workflow.add_edge("peer_review", "supervisor")
 
-# Initialize memory
-checkpointer = MemorySaver()
-
-# Compile the graph
 app = workflow.compile()
 
 
@@ -402,7 +397,6 @@ async def run_workflow(initial_state: ResearchState):
 
     try:
         async for state in app.astream(current_state, config={"recursion_limit": 50}):
-            # Convert the dictionary state back to a ResearchState object
             current_state = ResearchState(**current_state)
             for node_name, node_output in state.items():
                 if not isinstance(node_output, dict):
@@ -411,10 +405,8 @@ async def run_workflow(initial_state: ResearchState):
                     )
                     continue
 
-                # Update current_state with new information
                 current_state = ResearchState(**{**current_state, **node_output})
 
-            # Print only new logs
             new_logs = current_state["logs"][last_log_index:]
             for log in new_logs:
                 print(log)
@@ -423,7 +415,7 @@ async def run_workflow(initial_state: ResearchState):
             if current_state["current_step"] == END:
                 current_state["status"] = WorkflowStatus.COMPLETED
                 yield current_state
-                return  # This will stop the generator
+                return
 
             yield current_state
 

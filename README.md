@@ -40,7 +40,7 @@ In the execution log above, we can see the order in which things occurred. We ca
 
 We have not included any steps regarding deployment, but in real world scenario we'll provide tools to save your team of AI agents, deploy them and notification configuration options (if human intervention is needed / wanted).
 
-This one of the 3 use cases, we have provided examples for. To view the other use cases, you can spin up the UI with:
+This one of the 3 use cases we have provided examples for. To view the other use cases, you can spin up the UI with:
 ```
 cd align-ui
 npm install
