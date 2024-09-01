@@ -27,12 +27,6 @@ class RiskLevel(IntEnum):
     CRITICAL = 4
 
 
-# class WorkflowStatus(IntEnum):
-#     IN_PROGRESS = 0
-#     COMPLETED = 1
-#     HALTED = 2
-
-
 class WorkflowStatus(Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -209,6 +203,26 @@ def supervisor_agent(state: ResearchState) -> Dict[str, Any]:
                 f"Supervisor: Step '{current_step.name}' violates protocols. Halting workflow."
             )
             return {"current_step": END, "logs": logs, "last_node": "supervisor"}
+
+        if risk_level >= state["human_intervention_config"].risk_threshold:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            approved = loop.run_until_complete(
+                human_intervention(
+                    state,
+                    f"High risk step '{current_step.name}' (Risk: {risk_level.name}). Approve to proceed.",
+                )
+            )
+            loop.close()
+            if not approved:
+                logs.append(
+                    f"Supervisor: Step '{current_step.name}' rejected by human. Halting workflow."
+                )
+                return {
+                    "current_step": END,
+                    "logs": logs,
+                    "completed_steps": completed_steps,
+                }
 
         completed_steps.append(current_step.name)
         next_step_index = plan.index(current_step) + 1
