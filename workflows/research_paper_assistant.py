@@ -48,6 +48,7 @@ class ResearchState(TypedDict):
     completed_steps: List[str]
     logs: List[str]
     human_intervention_config: HumanInterventionConfig
+    last_node: str
 
 
 class ProtocolEnforcer:
@@ -162,20 +163,22 @@ def supervisor_agent(state: ResearchState) -> Dict[str, Any]:
         logs.append("Supervisor: Creating initial research plan.")
         system_message = SystemMessage(
             content="""
-        You are the Supervisor Agent in a research assistance system. Create a structured plan for the research task, including specific steps and agent assignments.
-        """
+            You are the Supervisor Agent in a research assistance system. Create a structured plan for the research task, including specific steps and agent assignments.
+            """
         )
         messages.append(system_message)
         response = model.invoke(messages)
         plan = parse_plan(response.content)
         logs.append(f"Supervisor: Created plan: {plan}")
+        next_step = plan[0].name
 
         return {
             "messages": messages + [response],
             "plan": plan,
-            "current_step": plan[0].name,
+            "current_step": next_step,
             "completed_steps": completed_steps,
             "logs": logs,
+            "last_node": "supervisor",
         }
 
     current_step = next(
@@ -192,50 +195,33 @@ def supervisor_agent(state: ResearchState) -> Dict[str, Any]:
             logs.append(
                 f"Supervisor: Step '{current_step.name}' violates protocols. Halting workflow."
             )
-            return {"current_step": END, "logs": logs}
-
-        if risk_level >= state["human_intervention_config"].risk_threshold:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            approved = loop.run_until_complete(
-                human_intervention(
-                    state,
-                    f"High risk step '{current_step.name}' (Risk: {risk_level.name}). Approve to proceed.",
-                )
-            )
-            loop.close()
-            if not approved:
-                logs.append(
-                    f"Supervisor: Step '{current_step.name}' rejected by human. Halting workflow."
-                )
-                return {
-                    "current_step": END,
-                    "logs": logs,
-                    "completed_steps": completed_steps,
-                }
+            return {"current_step": END, "logs": logs, "last_node": "supervisor"}
 
         completed_steps.append(current_step.name)
         next_step_index = plan.index(current_step) + 1
         if next_step_index < len(plan):
-            next_step = plan[next_step_index]
+            next_step = plan[next_step_index].name
             logs.append(
-                f"Supervisor: Moving from '{current_step.name}' to '{next_step.name}'"
+                f"Supervisor: Moving from '{current_step.name}' to '{next_step}'"
             )
-            return {
-                "current_step": next_step.name,
-                "completed_steps": completed_steps,
-                "logs": logs,
-            }
         else:
             logs.append("Supervisor: All steps completed. Ending workflow.")
-            return {
-                "current_step": END,
-                "completed_steps": completed_steps,
-                "logs": logs,
-            }
+            next_step = END
+
+        return {
+            "current_step": next_step,
+            "completed_steps": completed_steps,
+            "logs": logs,
+            "last_node": "supervisor",
+        }
     else:
         logs.append("Supervisor: No valid next step. Ending workflow.")
-        return {"current_step": END, "completed_steps": completed_steps, "logs": logs}
+        return {
+            "current_step": END,
+            "completed_steps": completed_steps,
+            "logs": logs,
+            "last_node": "supervisor",
+        }
 
 
 def parse_plan(plan_text: str) -> List[ResearchStep]:
@@ -282,6 +268,7 @@ def literature_review_agent(state: ResearchState) -> Dict[str, Any]:
     return {
         "results": {**state.get("results", {}), "literature_review": result},
         "logs": state["logs"],
+        "last_node": "literature_review",
     }
 
 
@@ -295,6 +282,7 @@ def data_analysis_agent(state: ResearchState) -> Dict[str, Any]:
     return {
         "results": {**state.get("results", {}), "data_analysis": result},
         "logs": state["logs"],
+        "last_node": "data_analysis",
     }
 
 
@@ -306,8 +294,9 @@ def writing_agent(state: ResearchState) -> Dict[str, Any]:
     result = WritingSectionTool().invoke(topic)
     state["logs"].append(f"Writing Agent: Completed writing. Result: {result}")
     return {
-        "results": {**state.get("results", {}), state["current_step"]: result},
+        "results": {**state.get("results", {}), "writing": result},
         "logs": state["logs"],
+        "last_node": "writing",
     }
 
 
@@ -319,6 +308,7 @@ def peer_review_agent(state: ResearchState) -> Dict[str, Any]:
     return {
         "results": {**state.get("results", {}), "peer_review": result},
         "logs": state["logs"],
+        "last_node": "peer_review",
     }
 
 
@@ -328,7 +318,7 @@ def route_step(
     "supervisor", "literature_review", "data_analysis", "writing", "peer_review", END
 ]:
     current_step = state["current_step"]
-    state["logs"].append(f"Router: Current step is '{current_step}'")
+    last_node = state["last_node"]
 
     if current_step == END:
         state["logs"].append("Router: Workflow complete.")
@@ -338,15 +328,18 @@ def route_step(
         state["logs"].append("Router: All steps completed. Ending workflow.")
         return END
 
-    current_step_info = next(
-        (step for step in state["plan"] if step.name == current_step), None
-    )
-    if current_step_info:
-        state["logs"].append(f"Router: Routing to '{current_step_info.agent}' agent.")
-        return current_step_info.agent
-    else:
-        state["logs"].append("Router: Routing to supervisor.")
-        return "supervisor"
+    if last_node == "supervisor":
+        current_step_info = next(
+            (step for step in state["plan"] if step.name == current_step), None
+        )
+        if current_step_info:
+            state["logs"].append(
+                f"Router: Routing to '{current_step_info.agent}' agent."
+            )
+            return current_step_info.agent
+
+    state["logs"].append("Router: Routing to supervisor.")
+    return "supervisor"
 
 
 # Define the graph
@@ -376,82 +369,118 @@ checkpointer = MemorySaver()
 app = workflow.compile()
 
 
-async def run_workflow(initial_state):
-    async for state in app.astream(initial_state, config={"recursion_limit": 50}):
-        for node_name, node_output in state.items():
-            if not isinstance(node_output, dict):
-                print(
-                    f"Unexpected node output type for {node_name}: {type(node_output)}"
-                )
-                continue
+class WorkflowStatus(IntEnum):
+    IN_PROGRESS = 0
+    COMPLETED = 1
+    HALTED = 2
 
-            if node_name == "supervisor":
-                # Check if the workflow has ended
-                if node_output.get("current_step") == END:
-                    return node_output
+
+async def run_workflow(initial_state: Dict[str, Any]):
+    current_state = initial_state.copy()
+    current_state["status"] = WorkflowStatus.IN_PROGRESS
+
+    try:
+        async for state in app.astream(current_state, config={"recursion_limit": 50}):
+            for node_name, node_output in state.items():
+                if not isinstance(node_output, dict):
+                    print(
+                        f"Unexpected node output type for {node_name}: {type(node_output)}"
+                    )
+                    continue
+
+                # Update the current state with the new information
+                current_state.update(node_output)
 
                 # Print logs
                 for log in node_output.get("logs", []):
                     print(log)
 
-                # Check for human intervention
-                current_step = node_output.get("current_step")
-                if current_step in ["data_analysis", "peer_review"]:
-                    plan = node_output.get("plan", [])
+                if node_name == "supervisor":
+                    # Check if the workflow has ended
+                    if current_state.get("current_step") == END:
+                        current_state["status"] = WorkflowStatus.COMPLETED
+                        yield current_state
+                        return
+
+                    # Check for human intervention
+                    current_step = current_state.get("current_step")
+                    plan = current_state.get("plan", [])
                     if isinstance(plan, list):
                         current_step_info = next(
                             (step for step in plan if step.name == current_step), None
                         )
-                        if (
-                            current_step_info
-                            and current_step_info.risk_level >= RiskLevel.HIGH
-                        ):
-                            loop = asyncio.get_event_loop()
-                            approved = await human_intervention(
-                                node_output,
-                                f"High risk step '{current_step}' (Risk: {current_step_info.risk_level.name}). Approve to proceed.",
+                        if current_step_info:
+                            risk_level = assess_risk(
+                                current_step_info, current_state.get("results", {})
                             )
-                            if not approved:
-                                print(
-                                    f"Step '{current_step}' rejected by human. Halting workflow."
+                            if (
+                                risk_level
+                                >= current_state[
+                                    "human_intervention_config"
+                                ].risk_threshold
+                            ):
+                                approved = await human_intervention(
+                                    current_state,
+                                    f"High risk step '{current_step}' (Risk: {risk_level.name}). Approve to proceed.",
                                 )
-                                return node_output
+                                if not approved:
+                                    print(
+                                        f"Step '{current_step}' rejected by human. Halting workflow."
+                                    )
+                                    current_state["status"] = WorkflowStatus.HALTED
+                                    yield current_state
+                                    return
 
-            elif node_name in [
-                "literature_review",
-                "data_analysis",
-                "writing",
-                "peer_review",
-            ]:
-                # Print logs from other agents
-                for log in node_output.get("logs", []):
-                    print(log)
+            yield current_state
 
-    # This should not be reached under normal circumstances
-    print("Workflow ended unexpectedly")
-    return state
+        # After the loop ends, yield the final state
+        yield current_state
+    except Exception as e:
+        print(f"An error occurred during workflow execution: {str(e)}")
+        current_state["status"] = WorkflowStatus.HALTED
+        current_state["error"] = str(e)
+        yield current_state
 
 
-# Run the workflow
-initial_state = {
-    "messages": [
-        HumanMessage(
-            content="I need help writing a research paper about the impact of AI on job markets."
-        )
-    ],
-    "current_step": "supervisor",
-    "plan": [],
-    "results": {},
-    "completed_steps": [],
-    "logs": ["Workflow started."],
-    "human_intervention_config": HumanInterventionConfig(
-        enabled=True, risk_threshold=RiskLevel.HIGH, notification_function=None
-    ),
-}
+async def main():
+    initial_state = {
+        "messages": [
+            HumanMessage(
+                content="I need help writing a research paper about the impact of AI on job markets."
+            )
+        ],
+        "current_step": "supervisor",
+        "plan": [],
+        "results": {},
+        "completed_steps": [],
+        "logs": ["Workflow started."],
+        "human_intervention_config": HumanInterventionConfig(
+            enabled=True, risk_threshold=RiskLevel.CRITICAL, notification_function=None
+        ),
+        "last_node": "supervisor",
+    }
 
-loop = asyncio.get_event_loop()
-final_state = loop.run_until_complete(run_workflow(initial_state))
+    final_state = None
+    try:
+        async for state in run_workflow(initial_state):
+            if state["status"] != WorkflowStatus.IN_PROGRESS:
+                final_state = state
+                break
+    except Exception as e:
+        print(f"An error occurred in the main function: {str(e)}")
+        final_state = {"status": WorkflowStatus.HALTED, "error": str(e)}
 
-print("\nFinal State:")
-print(f"Completed Steps: {final_state['completed_steps']}")
-print(f"Results: {final_state.get('results', {})}")
+    if final_state:
+        print("\nFinal State:")
+        print(f"Workflow Status: {WorkflowStatus(final_state['status']).name}")
+        print(f"Current Step: {final_state.get('current_step', 'Unknown')}")
+        print(f"Completed Steps: {final_state.get('completed_steps', [])}")
+        print(f"Results: {final_state.get('results', {})}")
+        if "error" in final_state:
+            print(f"Error: {final_state['error']}")
+    else:
+        print("Workflow did not complete successfully")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
