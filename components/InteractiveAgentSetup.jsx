@@ -4,7 +4,7 @@ import { HTML5Backend } from "react-dnd-html5-backend";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plug, Unplug, Settings } from "lucide-react";
+import { Plug, Unplug, Settings, Shield, Award } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -12,7 +12,51 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { additionalAgents, supervisorInfo } from "@/constants/agents";
+import { additionalAgents } from "@/constants/agents";
+
+const supervisorInfo = {
+  github: {
+    protocols: [
+      "Code Review Standards",
+      "Continuous Integration",
+      "Security Compliance",
+    ],
+    certificates: [
+      { name: "Security Compliance", icon: Shield, color: "text-green-500" },
+      {
+        name: "Code Quality Assurance",
+        icon: Award,
+        color: "text-pink-500",
+      },
+    ],
+  },
+  research: {
+    protocols: [
+      "Ethical Research Standards",
+      "Peer Review Process",
+      "Data Integrity",
+    ],
+    certificates: [
+      { name: "Ethical Research", icon: Shield, color: "text-green-500" },
+      { name: "Academic Integrity", icon: Award, color: "text-purple-500" },
+    ],
+  },
+  event: {
+    protocols: [
+      "Event Safety Standards",
+      "Budget Management",
+      "Vendor Verification",
+    ],
+    certificates: [
+      { name: "Event Safety", icon: Shield, color: "text-green-500" },
+      {
+        name: "Certified Event Planner",
+        icon: Award,
+        color: "text-amber-500",
+      },
+    ],
+  },
+};
 
 const Agent = ({
   agent,
@@ -128,7 +172,7 @@ const ConnectionVisualization = ({ agents, connections }) => {
               x2={end.x}
               y2={end.y}
               stroke="#9CA3AF"
-              strokeWidth="2"
+              strokeWidth="1"
             />
           );
         }
@@ -296,7 +340,7 @@ const InteractiveAgentSetup = ({
           )}
           <hr className="mt-7" />
           <div className="mt-7">
-            <h3 className="font-bold mb-2">Default Supervisor Protocols</h3>
+            <h3 className="font-bold mb-2">Recommended Supervisor Protocols</h3>
             <ul className="list-disc list-inside">
               {supervisorInfo[scenarioType].protocols.map((protocol, index) => (
                 <li key={index}>{protocol}</li>

@@ -110,9 +110,9 @@ const AgentInteractionGraph = ({
               <g transform={`translate(${position.x + 8}, ${position.y - 40})`}>
                 <path
                   d="M15 0 L30 30 L0 30 Z"
-                  fill="white"
+                  fill="pink"
                   stroke="black"
-                  strokeWidth="1.5"
+                  strokeWidth="1"
                 />
                 <text
                   x="15"
@@ -340,6 +340,7 @@ const MultiAgentCollaborationMockup = () => {
     setExecutionLog([]);
     setActiveAgentId(null);
     setSetupComplete(false);
+    setActionCounts({});
     currentLogIndexRef.current = 0;
     simulatedLogRef.current = [];
   }, []);
