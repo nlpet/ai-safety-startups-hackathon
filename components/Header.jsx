@@ -37,12 +37,14 @@ const Header = () => {
           <div className="flex items-center">
             <Link href="/" className="ml-4 lg:ml-0">
               <h1 className="text-2xl font-bold flex">
-                <span className="text-3xl font-medium align-middle">Ælign</span>
+                <div className="font-mono text-3xl font-medium align-middle underline">
+                  ÆLIGN
+                </div>
                 <Image
                   src="/logo.png"
                   className="ml-2"
-                  width={35}
-                  height={35}
+                  width={38}
+                  height={38}
                   alt="Logo"
                 />
               </h1>

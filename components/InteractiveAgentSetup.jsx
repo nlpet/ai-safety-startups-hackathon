@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useDrag, useDrop, DndProvider } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { Button } from "@/components/ui/button";
@@ -48,10 +48,12 @@ const Agent = ({
     >
       <Card>
         <CardContent className="p-4">
-          <div className="font-bold">{agent.name}</div>
+          <div className="font-bold">
+            [{agent.id}] {agent.name}
+          </div>
           <div className="text-sm">{agent.role}</div>
           {agent.tag && (
-            <div className="relative right-2 bottom-11 float-right text-xs mt-1 bg-slate-200 text-slate-900 px-2 py-1 rounded-sm">
+            <div className="relative right-2 bottom-11 float-right text-xs mt-1 bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-200 px-2 py-1 rounded-sm">
               {agent.tag}
             </div>
           )}
@@ -88,29 +90,79 @@ const Agent = ({
 };
 
 const ConnectionVisualization = ({ agents, connections }) => {
-  const toShowAgents = agents.filter(
-    (agent) => agent.name.indexOf("Supervisor") === -1
-  );
+  const [positions, setPositions] = useState({});
+
+  useEffect(() => {
+    const calculatePositions = () => {
+      const newPositions = {};
+      const centerX = 150;
+      const centerY = 150;
+      const radius = 120;
+
+      agents.forEach((agent, index) => {
+        const angle = (index / agents.length) * 2 * Math.PI;
+        newPositions[agent.id] = {
+          x: centerX + radius * Math.cos(angle),
+          y: centerY + radius * Math.sin(angle),
+        };
+      });
+
+      setPositions(newPositions);
+    };
+
+    calculatePositions();
+  }, [agents]);
 
   return (
-    <div className="mt-4">
-      {toShowAgents.map((agent) => (
-        <div key={agent.id} className="mb-2">
-          <span className="font-medium">{agent.name}:</span>
-          <ul className="list-disc list-inside ml-4">
-            {connections
-              .filter((conn) => conn.from === agent.id || conn.to === agent.id)
-              .map((conn, index) => (
-                <li key={index} className="list-none">
-                  {conn.from === agent.id
-                    ? `→ ${agents.find((a) => a.id === conn.to)?.name}`
-                    : `← ${agents.find((a) => a.id === conn.from)?.name}`}
-                </li>
-              ))}
-          </ul>
-        </div>
-      ))}
-    </div>
+    <svg width="300" height="300" viewBox="0 0 300 300">
+      {/* Draw connections */}
+      {connections.map((conn, index) => {
+        const start = positions[conn.from];
+        const end = positions[conn.to];
+        if (start && end) {
+          return (
+            <line
+              key={index}
+              x1={start.x}
+              y1={start.y}
+              x2={end.x}
+              y2={end.y}
+              stroke="#9CA3AF"
+              strokeWidth="2"
+            />
+          );
+        }
+        return null;
+      })}
+
+      {/* Draw agent nodes */}
+      {agents.map((agent) => {
+        const position = positions[agent.id];
+        if (position) {
+          return (
+            <g key={agent.id}>
+              <circle
+                cx={position.x}
+                cy={position.y}
+                r="23"
+                fill={agent.id === "S1" ? "#189c41" : "#2e446a"}
+              />
+              <text
+                x={position.x}
+                y={position.y}
+                textAnchor="middle"
+                dy=".3em"
+                fontSize="13"
+                fill="#fff"
+              >
+                {agent.id}
+              </text>
+            </g>
+          );
+        }
+        return null;
+      })}
+    </svg>
   );
 };
 

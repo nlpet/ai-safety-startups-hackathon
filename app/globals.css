@@ -2,14 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-@font-face {
-  font-family: "BentonSans-Regular";
-  font-style: normal;
-  font-weight: normal;
-  src: local("/fonts/BentonSans-Regular"),
-    url("/fonts/BentonSans-Regular.woff") format("woff");
-}
-
 :root {
   --foreground-rgb: 0, 0, 0;
   --background-start-rgb: 214, 219, 220;

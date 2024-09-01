@@ -2,13 +2,19 @@ import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Check, AlertTriangle, ShieldCheck, CirclePlay } from "lucide-react";
+import { Check, AlertTriangle, ShieldCheck } from "lucide-react";
 import InteractiveAgentSetup from "./InteractiveAgentSetup";
 import HumanInterventionCard from "./HumanInterventionCard";
 
 import { scenarioData, simulationLogs } from "@/constants/agents";
 
-const AgentInteractionGraph = ({ agents, connections, activeAgentId }) => {
+const AgentInteractionGraph = ({
+  agents,
+  connections,
+  activeAgentId,
+  requiresIntervention,
+  actionCounts,
+}) => {
   const [positions, setPositions] = useState({});
 
   useEffect(() => {
@@ -28,12 +34,13 @@ const AgentInteractionGraph = ({ agents, connections, activeAgentId }) => {
   }, [agents]);
 
   const getColor = (agentId) => {
-    if (agentId === activeAgentId) return "#ff6b6b";
-    return "#a2c4c9";
+    if (agentId === activeAgentId) return "#189c41";
+    return "#2e446a";
   };
 
   return (
-    <svg width="500" height="500" viewBox="0 0 500 500">
+    <svg width="400" height="400" viewBox="0 0 400 400">
+      {/* Draw connections */}
       {connections.map((connection, index) => {
         const start = positions[connection.from];
         const end = positions[connection.to];
@@ -45,33 +52,80 @@ const AgentInteractionGraph = ({ agents, connections, activeAgentId }) => {
             x2={end.x}
             y2={end.y}
             stroke="#95a5a6"
-            strokeWidth="2"
+            strokeWidth="1"
           />
         ) : null;
       })}
+
+      {/* Draw agent nodes */}
       {agents.map((agent) => {
         const position = positions[agent.id];
         return position ? (
           <g key={agent.id}>
-            <rect
-              x={position.x - 50}
-              y={position.y - 20}
-              width="150"
-              height="40"
+            {/* Agent node */}
+            <circle
+              cx={position.x}
+              cy={position.y}
+              r="30"
               fill={getColor(agent.id)}
-              rx="5"
-              ry="5"
             />
+
+            {/* Agent name */}
             <text
-              x={position.x + 20}
+              x={position.x}
               y={position.y}
               textAnchor="middle"
               dy=".3em"
-              fill="#1a1d1e"
-              fontSize="14"
+              fill="white"
+              fontSize="12"
             >
-              {agent.name}
+              {agent.id}
             </text>
+
+            {/* Action count badge */}
+            {actionCounts[agent.id] > 0 &&
+              !(requiresIntervention && agent.id === activeAgentId) && (
+                <g>
+                  <circle
+                    cx={position.x + 25}
+                    cy={position.y - 25}
+                    r="13"
+                    fill="#e74c3c"
+                  />
+                  <text
+                    x={position.x + 25}
+                    y={position.y - 25}
+                    textAnchor="middle"
+                    dy=".3em"
+                    fill="white"
+                    fontSize="12"
+                  >
+                    {actionCounts[agent.id]}
+                  </text>
+                </g>
+              )}
+
+            {/* Human intervention indicator */}
+            {requiresIntervention && agent.id === activeAgentId && (
+              <g transform={`translate(${position.x + 8}, ${position.y - 40})`}>
+                <path
+                  d="M15 0 L30 30 L0 30 Z"
+                  fill="white"
+                  stroke="black"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="15"
+                  y="23"
+                  textAnchor="middle"
+                  fill="black"
+                  fontSize="14"
+                  fontWeight="bold"
+                >
+                  !
+                </text>
+              </g>
+            )}
           </g>
         ) : null;
       })}
@@ -102,7 +156,10 @@ const ExecutionLog = ({ log, onHumanIntervention }) => {
   return (
     <div className="h-[600px] overflow-y-auto border rounded p-2">
       {log.map((entry, index) => (
-        <div key={index} className="mb-2 p-2 bg-gray-100 rounded text-sm">
+        <div
+          key={index}
+          className="mb-2 p-2 bg-slate-50 dark:bg-slate-900 rounded text-sm"
+        >
           <div className="flex justify-between items-start">
             <div>
               <span className="font-semibold text-lg">{entry.agentName}</span>
@@ -178,7 +235,99 @@ const MultiAgentCollaborationMockup = () => {
   const [activeAgentId, setActiveAgentId] = useState(null);
   const [isExecuting, setIsExecuting] = useState(false);
   const [setupComplete, setSetupComplete] = useState(false);
-  const [currentLogIndex, setCurrentLogIndex] = useState(0);
+  const [actionCounts, setActionCounts] = useState({});
+  const [requiresIntervention, setRequiresIntervention] = useState(false);
+
+  const currentLogIndexRef = useRef(0);
+  const executionIntervalRef = useRef(null);
+  const simulatedLogRef = useRef([]);
+
+  const simulateExecution = useCallback(() => {
+    if (!selectedScenario || isExecuting) {
+      return;
+    }
+
+    setIsExecuting(true);
+    if (currentLogIndexRef.current === 0) {
+      setExecutionLog([]);
+      setActionCounts({});
+      simulatedLogRef.current = simulationLogs[selectedScenario.id];
+    }
+
+    const runSimulation = () => {
+      if (currentLogIndexRef.current < simulatedLogRef.current.length) {
+        const currentEntry =
+          simulatedLogRef.current[currentLogIndexRef.current];
+
+        setExecutionLog((prevLog) => {
+          return [...prevLog, currentEntry];
+        });
+
+        const activeAgent = agentSetup.agents.find(
+          (agent) => agent.name === currentEntry.agentName
+        );
+        setActiveAgentId(activeAgent?.id);
+
+        setActionCounts((prevCounts) => ({
+          ...prevCounts,
+          [activeAgent?.id]: (prevCounts[activeAgent?.id] || 0) + 1,
+        }));
+
+        setRequiresIntervention(
+          currentEntry.requiresHumanIntervention || false
+        );
+
+        if (currentEntry.requiresHumanIntervention) {
+          clearInterval(executionIntervalRef.current);
+          setIsExecuting(false);
+        } else {
+          currentLogIndexRef.current += 1;
+        }
+      } else {
+        clearInterval(executionIntervalRef.current);
+        setIsExecuting(false);
+        setActiveAgentId(null);
+        currentLogIndexRef.current = 0;
+        setRequiresIntervention(false);
+      }
+    };
+
+    runSimulation(); // Run immediately for the first entry
+    executionIntervalRef.current = setInterval(runSimulation, 2000);
+
+    return () => {
+      if (executionIntervalRef.current) {
+        clearInterval(executionIntervalRef.current);
+      }
+    };
+  }, [selectedScenario, agentSetup, isExecuting]);
+
+  useEffect(() => {
+    return () => {
+      if (executionIntervalRef.current) {
+        clearInterval(executionIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const handleHumanIntervention = useCallback(
+    (decision, timestamp) => {
+      setExecutionLog((prevLog) => [
+        ...prevLog,
+        {
+          timestamp: timestamp,
+          agentName: "Human",
+          action: `Decision: ${decision}`,
+          risk: "low",
+        },
+      ]);
+      currentLogIndexRef.current += 1;
+      setRequiresIntervention(false);
+      setIsExecuting(true);
+      simulateExecution();
+    },
+    [simulateExecution]
+  );
 
   const handleScenarioSelect = useCallback((scenario) => {
     setSelectedScenario(scenario);
@@ -191,6 +340,8 @@ const MultiAgentCollaborationMockup = () => {
     setExecutionLog([]);
     setActiveAgentId(null);
     setSetupComplete(false);
+    currentLogIndexRef.current = 0;
+    simulatedLogRef.current = [];
   }, []);
 
   const handleAgentSetupUpdate = useCallback((newSetup) => {
@@ -200,79 +351,6 @@ const MultiAgentCollaborationMockup = () => {
   const completeSetup = useCallback(() => {
     setSetupComplete(true);
   }, []);
-
-  const executionInterval = useRef(null);
-
-  const simulateExecution = useCallback(() => {
-    if (!selectedScenario) return;
-
-    setIsExecuting(true);
-    if (currentLogIndex === 0) setExecutionLog([]);
-
-    const simulatedLog = simulationLogs[selectedScenario.id];
-
-    const runSimulation = () => {
-      if (currentLogIndex < simulatedLog.length) {
-        const currentEntry = simulatedLog[currentLogIndex];
-
-        setExecutionLog((prevLog) => [...prevLog, currentEntry]);
-        setActiveAgentId(
-          agentSetup.agents.find(
-            (agent) => agent.name === currentEntry.agentName
-          )?.id
-        );
-
-        if (currentEntry.requiresHumanIntervention) {
-          setIsExecuting(false);
-        } else {
-          setCurrentLogIndex((prevIndex) => prevIndex + 1);
-        }
-      } else {
-        setIsExecuting(false);
-        setActiveAgentId(null);
-        setCurrentLogIndex(0);
-        clearInterval(executionInterval.current);
-      }
-    };
-
-    executionInterval.current = setInterval(runSimulation, 2000);
-
-    return () => {
-      clearInterval(executionInterval.current);
-    };
-  }, [selectedScenario, agentSetup, currentLogIndex]);
-
-  useEffect(() => {
-    if (isExecuting) {
-      simulateExecution();
-    }
-    return () => {
-      if (executionInterval.current) {
-        clearInterval(executionInterval.current);
-      }
-    };
-  }, [isExecuting, simulateExecution]);
-
-  const handleHumanIntervention = useCallback((decision, timestamp) => {
-    setExecutionLog((prevLog) => [
-      ...prevLog,
-      {
-        timestamp: timestamp,
-        agentName: "Human",
-        action: `Decision: ${decision}`,
-        risk: "low",
-      },
-    ]);
-    setCurrentLogIndex((prevIndex) => prevIndex + 1);
-    setIsExecuting(true);
-  }, []);
-
-  const startOrContinueExecution = () => {
-    if (currentLogIndex === 0) {
-      setExecutionLog([]);
-    }
-    setIsExecuting(true);
-  };
 
   return (
     <div className="p-4">
@@ -334,23 +412,14 @@ const MultiAgentCollaborationMockup = () => {
         <Card className="mt-6">
           <CardHeader>
             Execution
-            <Button
-              className="w-64"
-              onClick={startOrContinueExecution}
-              disabled={isExecuting}
-            >
-              {isExecuting ? (
-                "Executing..."
-              ) : currentLogIndex === 0 ? (
-                <>
-                  Start <CirclePlay className="h-5 w-5 ml-3" />
-                </>
-              ) : (
-                "Continue Execution"
-              )}
+            <Button onClick={simulateExecution} disabled={isExecuting}>
+              {isExecuting
+                ? "Executing..."
+                : currentLogIndexRef.current === 0
+                ? "Start Execution"
+                : "Continue Execution"}
             </Button>
           </CardHeader>
-          <hr className="mb-7" />
           <CardContent>
             <div className="flex">
               <div className="w-1/2 pr-2">
@@ -367,6 +436,8 @@ const MultiAgentCollaborationMockup = () => {
                     agents={agentSetup.agents}
                     connections={agentSetup.connections}
                     activeAgentId={activeAgentId}
+                    requiresIntervention={requiresIntervention}
+                    actionCounts={actionCounts}
                   />
                 )}
               </div>
