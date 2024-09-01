@@ -1,7 +1,7 @@
 # Hackathon for Technical AI Safety Startups
 
 Hackathon Page: https://www.apartresearch.com/event/ais-startup-hackathon  
-Project Page: TBD
+Project Page: https://www.apartresearch.com/project/aelign-aligned-agent-based-workflows-via-collaboration-safety-protocols  
 
 
 # Project
