@@ -2,7 +2,7 @@ import os
 import aiohttp
 import asyncio
 from typing import Annotated, Literal, TypedDict, List, Dict, Any, Callable, Coroutine
-from enum import IntEnum
+from enum import IntEnum, Enum
 from langchain_core.messages import (
     HumanMessage,
     AIMessage,
@@ -27,6 +27,18 @@ class RiskLevel(IntEnum):
     CRITICAL = 4
 
 
+# class WorkflowStatus(IntEnum):
+#     IN_PROGRESS = 0
+#     COMPLETED = 1
+#     HALTED = 2
+
+
+class WorkflowStatus(Enum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    HALTED = "halted"
+
+
 class HumanInterventionConfig(BaseModel):
     enabled: bool = True
     risk_threshold: RiskLevel = RiskLevel.HIGH
@@ -49,6 +61,7 @@ class ResearchState(TypedDict):
     logs: List[str]
     human_intervention_config: HumanInterventionConfig
     last_node: str
+    status: WorkflowStatus
 
 
 class ProtocolEnforcer:
@@ -369,18 +382,14 @@ checkpointer = MemorySaver()
 app = workflow.compile()
 
 
-class WorkflowStatus(IntEnum):
-    IN_PROGRESS = 0
-    COMPLETED = 1
-    HALTED = 2
-
-
-async def run_workflow(initial_state: Dict[str, Any]):
+async def run_workflow(initial_state: ResearchState):
     current_state = initial_state.copy()
-    current_state["status"] = WorkflowStatus.IN_PROGRESS
+    last_log_index = 0
 
     try:
         async for state in app.astream(current_state, config={"recursion_limit": 50}):
+            # Convert the dictionary state back to a ResearchState object
+            current_state = ResearchState(**current_state)
             for node_name, node_output in state.items():
                 if not isinstance(node_output, dict):
                     print(
@@ -388,98 +397,72 @@ async def run_workflow(initial_state: Dict[str, Any]):
                     )
                     continue
 
-                # Update the current state with the new information
-                current_state.update(node_output)
+                # Update current_state with new information
+                current_state = ResearchState(**{**current_state, **node_output})
 
-                # Print logs
-                for log in node_output.get("logs", []):
-                    print(log)
+            # Print only new logs
+            new_logs = current_state["logs"][last_log_index:]
+            for log in new_logs:
+                print(log)
+            last_log_index = len(current_state["logs"])
 
-                if node_name == "supervisor":
-                    # Check if the workflow has ended
-                    if current_state.get("current_step") == END:
-                        current_state["status"] = WorkflowStatus.COMPLETED
-                        yield current_state
-                        return
-
-                    # Check for human intervention
-                    current_step = current_state.get("current_step")
-                    plan = current_state.get("plan", [])
-                    if isinstance(plan, list):
-                        current_step_info = next(
-                            (step for step in plan if step.name == current_step), None
-                        )
-                        if current_step_info:
-                            risk_level = assess_risk(
-                                current_step_info, current_state.get("results", {})
-                            )
-                            if (
-                                risk_level
-                                >= current_state[
-                                    "human_intervention_config"
-                                ].risk_threshold
-                            ):
-                                approved = await human_intervention(
-                                    current_state,
-                                    f"High risk step '{current_step}' (Risk: {risk_level.name}). Approve to proceed.",
-                                )
-                                if not approved:
-                                    print(
-                                        f"Step '{current_step}' rejected by human. Halting workflow."
-                                    )
-                                    current_state["status"] = WorkflowStatus.HALTED
-                                    yield current_state
-                                    return
+            if current_state["current_step"] == END:
+                current_state["status"] = WorkflowStatus.COMPLETED
+                yield current_state
+                return  # This will stop the generator
 
             yield current_state
 
-        # After the loop ends, yield the final state
-        yield current_state
     except Exception as e:
         print(f"An error occurred during workflow execution: {str(e)}")
         current_state["status"] = WorkflowStatus.HALTED
-        current_state["error"] = str(e)
+        current_state["logs"].append(f"Error: {str(e)}")
         yield current_state
 
 
 async def main():
-    initial_state = {
-        "messages": [
+    initial_state = ResearchState(
+        messages=[
             HumanMessage(
                 content="I need help writing a research paper about the impact of AI on job markets."
             )
         ],
-        "current_step": "supervisor",
-        "plan": [],
-        "results": {},
-        "completed_steps": [],
-        "logs": ["Workflow started."],
-        "human_intervention_config": HumanInterventionConfig(
-            enabled=True, risk_threshold=RiskLevel.CRITICAL, notification_function=None
+        current_step="supervisor",
+        plan=[],
+        results={},
+        completed_steps=[],
+        logs=["Workflow started."],
+        human_intervention_config=HumanInterventionConfig(
+            enabled=True, risk_threshold=RiskLevel.CRITICAL
         ),
-        "last_node": "supervisor",
-    }
+        last_node="supervisor",
+        status=WorkflowStatus.IN_PROGRESS,
+    )
 
-    final_state = None
+    final_state = initial_state
     try:
         async for state in run_workflow(initial_state):
+            final_state = state
             if state["status"] != WorkflowStatus.IN_PROGRESS:
-                final_state = state
                 break
+
+        print("\nFinal State:")
+        print(f"Workflow Status: {final_state['status'].name}")
+        print(f"Current Step: {final_state['current_step']}")
+        print(f"Completed Steps: {final_state['completed_steps']}")
+        print("Results:")
+        for step, result in final_state["results"].items():
+            print(f"  {step}: {result}")
+        print()
+
     except Exception as e:
         print(f"An error occurred in the main function: {str(e)}")
-        final_state = {"status": WorkflowStatus.HALTED, "error": str(e)}
-
-    if final_state:
-        print("\nFinal State:")
-        print(f"Workflow Status: {WorkflowStatus(final_state['status']).name}")
-        print(f"Current Step: {final_state.get('current_step', 'Unknown')}")
-        print(f"Completed Steps: {final_state.get('completed_steps', [])}")
-        print(f"Results: {final_state.get('results', {})}")
-        if "error" in final_state:
-            print(f"Error: {final_state['error']}")
-    else:
-        print("Workflow did not complete successfully")
+    finally:
+        # Clean up any remaining tasks
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 if __name__ == "__main__":
